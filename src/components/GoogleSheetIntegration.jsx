@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { fetchSheetData } from '../utils/googleSheetsService';
 import { useCart } from '../context/CartContext';
-import './GoogleSheetIntegration.css';
 
 const GoogleSheetIntegration = () => {
+  const ITEMS_PER_PAGE = 10;
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -13,23 +14,16 @@ const GoogleSheetIntegration = () => {
   const [sortOption, setSortOption] = useState('name');
   const { addToCart, getItemQuantity } = useCart();
 
-  useEffect(() => {
-    loadProducts();
-  }, []);
-
-  useEffect(() => {
-    filterAndSortProducts();
-  }, [products, searchTerm, selectedCategory, sortOption]);
+  useEffect(() => { loadProducts(); }, []);
+  useEffect(() => { filterAndSortProducts(); }, [products, searchTerm, selectedCategory, sortOption]);
 
   const loadProducts = async () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await fetchSheetData();
-      setProducts(data);
+      setProducts(await fetchSheetData());
     } catch (err) {
       setError('Error al cargar productos');
-      console.error('Error:', err);
     } finally {
       setLoading(false);
     }
@@ -37,26 +31,21 @@ const GoogleSheetIntegration = () => {
 
   const filterAndSortProducts = () => {
     let result = [...products];
-    
-    // Filtrar por término de búsqueda
+
     if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      result = result.filter(product => 
-        product.name.toLowerCase().includes(term) || 
-        product.description.toLowerCase().includes(term) ||
-        (product.category && product.category.toLowerCase().includes(term))
+      const t = searchTerm.toLowerCase();
+      result = result.filter(p =>
+        p.name.toLowerCase().includes(t) ||
+        p.description.toLowerCase().includes(t) ||
+        (p.category && p.category.toLowerCase().includes(t))
       );
     }
-    
-    // Filtrar por categoría
+
     if (selectedCategory !== 'all') {
-      result = result.filter(product => 
-        product.category && product.category === selectedCategory
-      );
+      result = result.filter(p => p.category === selectedCategory);
     }
-    
-    // Ordenar productos
-    switch(sortOption) {
+
+    switch (sortOption) {
       case 'name':
         result.sort((a, b) => a.name.localeCompare(b.name));
         break;
@@ -72,182 +61,227 @@ const GoogleSheetIntegration = () => {
       default:
         break;
     }
-    
+
     setFilteredProducts(result);
+    setCurrentPage(1);
   };
 
-  const handleAddToCart = (product) => {
-    if (product.stock > 0) {
-      addToCart(product, 1);
-    }
-  };
-
-  // Obtener categorías únicas
   const categories = useMemo(() => {
     const cats = products
-      .map(product => product.category)
-      .filter((cat, index, arr) => cat && arr.indexOf(cat) === index);
+      .map(p => p.category)
+      .filter((c, i, arr) => c && arr.indexOf(c) === i);
     return ['all', ...cats];
   }, [products]);
 
-  // Calcular estadísticas
-  const stats = useMemo(() => {
-    const total = products.length;
-    const available = products.filter(p => p.stock > 5).length;
-    const lowStock = products.filter(p => p.stock > 0 && p.stock <= 5).length;
-    const outOfStock = products.filter(p => p.stock <= 0).length;
-    
-    return { total, available, lowStock, outOfStock };
-  }, [products]);
+  const stats = useMemo(() => ({
+    total: products.length,
+    available: products.filter(p => p.stock > 5).length,
+    lowStock: products.filter(p => p.stock > 0 && p.stock <= 5).length,
+    outOfStock: products.filter(p => p.stock <= 0).length,
+  }), [products]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / ITEMS_PER_PAGE));
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredProducts.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredProducts, currentPage]);
+
+  const goToPage = (page) => {
+    setCurrentPage(Math.min(Math.max(1, page), totalPages));
+  };
+
+  const selectCls =
+    'px-2.5 py-1.5 rounded-lg border border-green-200 bg-white text-green-800 text-xs focus:outline-none focus:ring-2 focus:ring-green-400 cursor-pointer';
 
   if (loading) {
     return (
-      <div className="products-section">
-        <h2>🛒 Nuestros Productos</h2>
-        <div className="loading">
-          <p>Cargando productos orgánicos...</p>
-        </div>
+      <div className="py-20 flex flex-col items-center gap-3 text-green-500">
+        <svg className="animate-spin w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+        </svg>
+        <p className="text-sm font-medium">Cargando productos orgánicos...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="products-section">
-        <h2>🛒 Nuestros Productos</h2>
-        <div className="error">
-          <p>{error}</p>
-          <button onClick={loadProducts} className="retry-btn">
-            Reintentar
-          </button>
-        </div>
+      <div className="py-20 flex flex-col items-center gap-3">
+        <span className="text-4xl">🌿</span>
+        <p className="text-red-500 text-sm font-medium">{error}</p>
+        <button
+          onClick={loadProducts}
+          className="px-4 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition"
+        >
+          Reintentar
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="products-section">
-      <h2>🛒 Nuestros Productos</h2>
-      
-      {/* Estadísticas */}
-      <div className="products-stats">
-        <div className="stat-item">
-          <span className="stat-number">{stats.total}</span>
-          <span className="stat-label">Total</span>
+    <main className="w-full flex justify-center py-10">
+      <section className="w-[95%] md:w-[85%] lg:w-[80%] max-w-7xl space-y-6">
+
+        {/* TÍTULO */}
+        <div>
+          <h2 className="text-lg font-bold text-green-900">
+            🛒 Nuestros Productos
+          </h2>
+          <p className="text-green-500 text-xs mt-0.5">
+            Frescos, orgánicos y directo del campo
+          </p>
         </div>
-        <div className="stat-item">
-          <span className="stat-number">{stats.available}</span>
-          <span className="stat-label">Disponibles</span>
+
+        {/* STATS */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: 'Total', value: stats.total, cls: 'bg-green-100 text-green-700' },
+            { label: 'Disponibles', value: stats.available, cls: 'bg-emerald-100 text-emerald-700' },
+            { label: 'Poco stock', value: stats.lowStock, cls: 'bg-yellow-100 text-yellow-700' },
+            { label: 'Agotados', value: stats.outOfStock, cls: 'bg-red-100 text-red-600' },
+          ].map(({ label, value, cls }) => (
+            <div key={label} className={`rounded-xl p-3 text-center ${cls}`}>
+              <p className="text-xl font-bold">{value}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">
+                {label}
+              </p>
+            </div>
+          ))}
         </div>
-        <div className="stat-item">
-          <span className="stat-number">{stats.lowStock}</span>
-          <span className="stat-label">Poco Stock</span>
-        </div>
-        <div className="stat-item">
-          <span className="stat-number">{stats.outOfStock}</span>
-          <span className="stat-label">Agotados</span>
-        </div>
-      </div>
-      
-      {/* Controles de filtrado y ordenamiento */}
-      <div className="products-controls">
-        <div className="search-and-filters">
-          <div className="search-bar">
+
+        {/* CONTROLES */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-green-400 text-xs">🔍</span>
             <input
               type="text"
               placeholder="Buscar productos..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-7 pr-3 py-2 rounded-lg border border-green-200 bg-white text-green-800 placeholder-green-300 text-xs focus:outline-none focus:ring-2 focus:ring-green-400"
             />
           </div>
-          
-          <div className="filter-controls">
-            <select 
-              value={selectedCategory} 
-              onChange={(e) => setSelectedCategory(e.target.value)}
-            >
-              {categories.map(cat => (
-                <option key={cat} value={cat}>
-                  {cat === 'all' ? 'Todas las categorías' : cat}
-                </option>
-              ))}
-            </select>
-            
-            <select 
-              value={sortOption} 
-              onChange={(e) => setSortOption(e.target.value)}
-            >
-              <option value="name">Ordenar por nombre</option>
-              <option value="price-asc">Precio: menor a mayor</option>
-            <option value="price-desc">Precio: mayor a menor</option>
-            <option value="stock">Más stock primero</option>
+
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className={selectCls}
+          >
+            {categories.map(c => (
+              <option key={c} value={c}>
+                {c === 'all' ? 'Todas las categorías' : c}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={sortOption}
+            onChange={(e) => setSortOption(e.target.value)}
+            className={selectCls}
+          >
+            <option value="name">Por nombre</option>
+            <option value="price-asc">Menor precio</option>
+            <option value="price-desc">Mayor precio</option>
+            <option value="stock">Más stock</option>
           </select>
         </div>
-      </div>
-    </div>
-      
-      {/* Lista de productos */}
-      <div className="products-grid">
-        {filteredProducts.map((product) => {
-          const quantityInCart = getItemQuantity(product.id);
-          const isOutOfStock = product.stock <= 0;
-          const isLowStock = product.stock <= 5 && product.stock > 0;
 
-          return (
-            <div key={product.id} className={`product-card ${isOutOfStock ? 'out-of-stock' : ''}`}>
-              <div className="product-image">
-                <img 
-                  src={product.image} 
-                  alt={product.name}
-                  onError={(e) => {
-                    e.target.src = './placeholder-product.svg';
-                  }}
-                />
-                {isOutOfStock && <div className="stock-overlay">Agotado</div>}
-                {isLowStock && <div className="low-stock-badge">¡Últimas unidades!</div>}
-                {product.category && (
-                  <div className="category-badge">{product.category}</div>
-                )}
-              </div>
-              
-              <div className="product-info">
-                <h3 className="product-name">{product.name}</h3>
-                <p className="product-description">{product.description}</p>
-                
-                <div className="product-details">
-                  <span className="product-price">${product.price.toLocaleString()}</span>
-                  <span className={`product-stock ${isLowStock ? 'low' : ''}`}>
-                    Stock: {product.stock}
-                  </span>
+        {/* GRID */}
+        {filteredProducts.length > 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            {paginatedProducts.map(product => {
+              const inCart = getItemQuantity(product.id);
+              const isOut = product.stock <= 0;
+              const isLow = product.stock > 0 && product.stock <= 5;
+
+              return (
+                <div
+                  key={product.id}
+                  className={`bg-white rounded-xl overflow-hidden border flex flex-col transition hover:-translate-y-1 hover:shadow-lg
+                    ${isOut ? 'opacity-60 border-gray-200' : 'border-green-100 hover:border-green-300'}`}
+                >
+                  <div className="bg-green-50 h-36 overflow-hidden">
+                    <img
+                      src={product.image}
+                      alt={product.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => e.target.src = './placeholder-product.svg'}
+                    />
+                  </div>
+
+                  <div className="p-3 flex flex-col gap-2 flex-1">
+                    <h3 className="text-xs font-bold text-green-900">{product.name}</h3>
+                    <p className="text-[11px] text-green-500 line-clamp-2">{product.description}</p>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-bold text-green-700">
+                        ${product.price.toLocaleString()}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold
+                        ${isOut ? 'bg-red-100 text-red-500' :
+                          isLow ? 'bg-amber-100 text-amber-600' :
+                            'bg-green-100 text-green-600'}`}
+                      >
+                        Stock: {product.stock}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => !isOut && addToCart(product, 1)}
+                      disabled={isOut}
+                      className={`w-full py-2 rounded-lg text-xs font-semibold transition
+                        ${isOut
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-green-600 hover:bg-green-500 text-white active:scale-95'}`}
+                    >
+                      {isOut ? 'Agotado' : '+ Agregar'}
+                    </button>
+
+                    {inCart > 0 && (
+                      <p className="text-center text-[10px] text-green-600 bg-green-50 rounded py-1">
+                        ✅ En carrito: {inCart}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                
-                <div className="product-actions">
-                  <button 
-                    onClick={() => handleAddToCart(product)}
-                    disabled={isOutOfStock}
-                    className={`add-to-cart-btn ${isOutOfStock ? 'disabled' : ''}`}
-                  >
-                    {isOutOfStock ? 'Agotado' : 'Agregar al Carrito'}
-                  </button>
-                  
-                  {quantityInCart > 0 && (
-                    <span className="cart-quantity">
-                      En carrito: {quantityInCart}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      
-      {filteredProducts.length === 0 && (
-        <div className="no-products">
-          <p>No se encontraron productos con los filtros seleccionados.</p>
-        </div>
-      )}
-    </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-16 space-y-2">
+            <span className="text-4xl">🌿</span>
+            <p className="text-green-600 text-sm font-medium">No se encontraron productos</p>
+            <p className="text-green-400 text-xs">Prueba con otros filtros</p>
+          </div>
+        )}
+
+        {filteredProducts.length > 0 && totalPages > 1 && (
+          <div className="flex items-center justify-between gap-3 flex-wrap pt-2">
+            <button
+              onClick={() => goToPage(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-green-200 text-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Anterior
+            </button>
+
+            <p className="text-xs text-green-700">
+              PÃ¡gina {currentPage} de {totalPages}
+            </p>
+
+            <button
+              onClick={() => goToPage(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-green-200 text-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Siguiente
+            </button>
+          </div>
+        )}
+      </section>
+    </main>
   );
 };
 
